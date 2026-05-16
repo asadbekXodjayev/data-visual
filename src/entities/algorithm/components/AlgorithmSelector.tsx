@@ -4,14 +4,12 @@ import React from 'react';
 import { useAlgorithmState, useAlgorithmActions, SortAlgorithm } from '../store';
 
 const categories: Array<{
-  id: 'simple' | 'efficient' | 'distribution' | 'exotic';
+  id: 'simple' | 'efficient';
   title: string;
   description: string;
 }> = [
   { id: 'simple', title: 'Simple', description: 'Basic algorithms for learning' },
   { id: 'efficient', title: 'Efficient', description: 'O(n log n) complexity' },
-  { id: 'distribution', title: 'Distribution', description: 'Non-comparison based' },
-  { id: 'exotic', title: 'Exotic', description: 'Unique approaches' },
 ];
 
 interface AlgorithmSelectorProps {

@@ -18,7 +18,7 @@ export const GlobalHUD: React.FC = () => {
       initial={{ y: 100, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.5, ease: 'easeOut' }}
-      className="fixed bottom-6 left-6 z-50"
+      className="fixed relative bottom-35 z-50"
     >
       <div className="glass glass-strong px-6 py-4 rounded-2xl shadow-2xl max-w-[calc(100vw-12rem)]">
         {/* Progress Bar */}

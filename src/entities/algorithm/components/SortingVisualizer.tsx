@@ -25,6 +25,13 @@ export const SortingVisualizer: React.FC = () => {
   const generatorRef = useRef<Generator<AlgorithmOperation, void, unknown> | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const isFinishedRef = useRef(false);
+  const internalArrayRef = useRef<ArrayData[]>([]);
+  const soundEnabledRef = useRef(soundEnabled);
+
+  // Update refs when values change - use effect to avoid accessing refs during render
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+  }, [soundEnabled]);
 
   // Calculate bar dimensions based on array size - ensure perfect alignment
   const gap = 1;
@@ -45,10 +52,16 @@ export const SortingVisualizer: React.FC = () => {
     }
   }, [currentAlgorithm]);
 
-  // eslint-disable-next-line
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (arrayData && arrayData.length > 0) {
-      initGenerator(arrayData);
+      const arrCopy = arrayData.map((item) => ({ ...item }));
+      setInternalArray(arrCopy);
+      const algoFn = algorithmRegistry[currentAlgorithm];
+      if (algoFn) {
+        generatorRef.current = algoFn(arrCopy);
+        isFinishedRef.current = false;
+      }
     }
   }, [arrayData?.length, currentAlgorithm]);
 
@@ -79,7 +92,7 @@ export const SortingVisualizer: React.FC = () => {
         const [i, j] = operation.indices;
         setComparingIndices(new Set([i, j]));
         incrementComparisons();
-        if (soundEnabled && internalArray[i] && internalArray[j]) {
+        if (soundEnabledRef.current && internalArray[i] && internalArray[j]) {
           soundManager.playCompare(internalArray[i].value, maxValue);
         }
         break;
@@ -89,7 +102,7 @@ export const SortingVisualizer: React.FC = () => {
         const [i, j] = operation.indices;
         setSwappingIndices(new Set([i, j]));
         incrementSwaps();
-        if (soundEnabled && internalArray[i] && internalArray[j]) {
+        if (soundEnabledRef.current && internalArray[i] && internalArray[j]) {
           soundManager.playSwap(internalArray[i].value, internalArray[j].value, maxValue);
         }
         
@@ -115,13 +128,13 @@ export const SortingVisualizer: React.FC = () => {
         setArrayValues(sortedValues);
         setSortedIndices(new Set(internalArray.map((_, i) => i)));
         markArrayAsSorted();
-        if (soundEnabled) {
+        if (soundEnabledRef.current) {
           soundManager.playComplete();
         }
         break;
       }
     }
-  }, [isPaused, internalArray, incrementComparisons, incrementSwaps, markArrayAsSorted, setArrayValues, soundEnabled]);
+  }, [isPaused, internalArray, incrementComparisons, incrementSwaps, markArrayAsSorted, setArrayValues]);
 
   // Animation loop
   useEffect(() => {

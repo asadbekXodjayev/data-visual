@@ -7,13 +7,7 @@ export type AlgorithmType =
   | 'insertion' 
   | 'merge' 
   | 'quick' 
-  | 'heap' 
-  | 'radix' 
-  | 'bucket' 
-  | 'counting' 
-  | 'shell' 
-  | 'comb' 
-  | 'cocktail';
+  | 'heap';
 
 export type GridCellType = 0 | 1 | 2 | 3;
 
@@ -37,7 +31,7 @@ export interface SortAlgorithm {
   name: AlgorithmType;
   displayName: string;
   complexity: string;
-  category: 'simple' | 'efficient' | 'distribution' | 'exotic';
+  category: 'simple' | 'efficient';
 }
 
 export interface AlgorithmState {
@@ -85,12 +79,6 @@ const ALGORITHM_LIST: Record<AlgorithmType, SortAlgorithm> = {
   merge: { name: 'merge', displayName: 'Merge Sort', complexity: 'O(n log n)', category: 'efficient' },
   quick: { name: 'quick', displayName: 'Quick Sort', complexity: 'O(n log n)', category: 'efficient' },
   heap: { name: 'heap', displayName: 'Heap Sort', complexity: 'O(n log n)', category: 'efficient' },
-  radix: { name: 'radix', displayName: 'Radix Sort', complexity: 'O(nk)', category: 'distribution' },
-  bucket: { name: 'bucket', displayName: 'Bucket Sort', complexity: 'O(n + k)', category: 'distribution' },
-  counting: { name: 'counting', displayName: 'Counting Sort', complexity: 'O(n + k)', category: 'distribution' },
-  shell: { name: 'shell', displayName: 'Shell Sort', complexity: 'O(n log² n)', category: 'exotic' },
-  comb: { name: 'comb', displayName: 'Comb Sort', complexity: 'O(n log n)', category: 'exotic' },
-  cocktail: { name: 'cocktail', displayName: 'Cocktail Shaker', complexity: 'O(n²)', category: 'exotic' },
 };
 
 interface AlgorithmActions {
