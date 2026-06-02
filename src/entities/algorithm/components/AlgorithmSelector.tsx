@@ -1,80 +1,68 @@
 'use client';
 
 import React from 'react';
-import { useAlgorithmState, useAlgorithmActions, SortAlgorithm } from '../store';
+import { motion, useReducedMotion } from 'framer-motion';
+import { useAlgorithmState, useAlgorithmActions, AlgorithmCategory, SortAlgorithm } from '../store';
 
-const categories: Array<{
-  id: 'simple' | 'efficient';
-  title: string;
-  description: string;
-}> = [
-  { id: 'simple', title: 'Simple', description: 'Basic algorithms for learning' },
-  { id: 'efficient', title: 'Efficient', description: 'O(n log n) complexity' },
+const CATEGORIES: { id: AlgorithmCategory; title: string; hint: string }[] = [
+  { id: 'simple', title: 'Simple', hint: 'O(n²) · learn the basics' },
+  { id: 'efficient', title: 'Efficient', hint: 'Divide, heap & gap based' },
+  { id: 'distribution', title: 'Distribution', hint: 'Non-comparison · counting' },
+  { id: 'exotic', title: 'Exotic', hint: 'Curiosities & oddities' },
 ];
 
-interface AlgorithmSelectorProps {
-  onSelect?: (algorithm: string) => void;
-}
-
-export const AlgorithmSelector: React.FC<AlgorithmSelectorProps> = ({ onSelect }) => {
+export const AlgorithmSelector: React.FC = () => {
   const { currentAlgorithm, isRunning } = useAlgorithmState();
   const { setAlgorithm, getAllAlgorithms } = useAlgorithmActions();
-  
+  const reduceMotion = useReducedMotion();
   const algorithms = getAllAlgorithms();
-  
-  const handleSelect = (algo: SortAlgorithm) => {
-    setAlgorithm(algo.name);
-    onSelect?.(algo.name);
-  };
 
   return (
-    <div className="space-y-6">
-      {categories.map((category) => (
-        <div key={category.id} className="space-y-3">
-          <div className="flex items-center gap-3">
-            <div className="h-px flex-1 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-            <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-              {category.title}
-            </span>
-            <div className="h-px flex-1 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-          </div>
-          
-          <p className="text-xs text-gray-500 -mt-2">{category.description}</p>
-          
-          <div className="grid grid-cols-2 gap-2">
-            {algorithms
-              .filter((algo) => algo.category === category.id)
-              .map((algo) => (
-                <button
-                  key={algo.name}
-                  onClick={() => handleSelect(algo)}
-                  disabled={isRunning}
-                  className={`
-                    px-4 py-3 rounded-xl text-left transition-all duration-200
-                    glass glass-hover group relative overflow-hidden
-                    ${currentAlgorithm === algo.name 
-                      ? 'glass-active ring-1 ring-[#E63946]' 
-                      : ''}
-                    ${isRunning ? 'opacity-50 cursor-not-allowed' : ''}
-                  `}
-                >
-                  <div className="relative z-10">
-                    <p className="text-sm font-medium text-white group-hover:text-[#E63946] transition-colors">
-                      {algo.displayName}
+    <div className="space-y-5">
+      {CATEGORIES.map((category) => {
+        const items = algorithms.filter((a) => a.category === category.id);
+        return (
+          <div key={category.id} className="space-y-2">
+            <div className="flex items-baseline justify-between">
+              <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-[#FFB627]">
+                {category.title}
+              </span>
+              <span className="text-[10px] text-white/35">{category.hint}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {items.map((algo: SortAlgorithm) => {
+                const active = currentAlgorithm === algo.name;
+                return (
+                  <motion.button
+                    key={algo.name}
+                    onClick={() => setAlgorithm(algo.name)}
+                    disabled={isRunning}
+                    whileTap={reduceMotion || isRunning ? undefined : { scale: 0.97 }}
+                    className={`relative overflow-hidden rounded-lg border px-3 py-2.5 text-left transition-colors duration-200
+                      ${
+                        active
+                          ? 'border-[#22D3EE]/60 bg-[#22D3EE]/10'
+                          : 'border-white/10 bg-white/[0.02] hover:border-white/25 hover:bg-white/[0.05]'
+                      }
+                      ${isRunning ? 'cursor-not-allowed opacity-50' : ''}`}
+                  >
+                    {active && (
+                      <motion.span
+                        layoutId={reduceMotion ? undefined : 'algo-active'}
+                        className="absolute inset-y-0 left-0 w-0.5 bg-[#22D3EE]"
+                      />
+                    )}
+                    <p className={`text-[13px] font-medium ${active ? 'text-white' : 'text-white/80'}`}>
+                      {algo.displayName.replace(' Sort', '')}
                     </p>
-                    <p className="text-xs text-gray-400 mt-1 font-mono">
-                      {algo.complexity}
-                    </p>
-                  </div>
-                  
-                  {/* Background gradient on hover */}
-                  <div className="absolute inset-0 bg-gradient-to-r from-[#E63946]/0 via-[#E63946]/5 to-[#E63946]/0 
-                                  translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
-                </button>
-              ))}
+                    <p className="mt-0.5 font-mono text-[10px] text-white/40">{algo.complexity.average}</p>
+                  </motion.button>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 };

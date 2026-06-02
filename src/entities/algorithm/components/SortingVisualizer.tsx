@@ -1,253 +1,366 @@
 'use client';
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { useAlgorithmState, useAlgorithmActions, ArrayData } from '../store';
-import { Bar } from './Bar';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
+import { Play, Pause, RotateCcw, SkipForward, Shuffle, Volume2, VolumeX, Square } from 'lucide-react';
+import { useAlgorithmState, useAlgorithmActions } from '../store';
 import { algorithmRegistry, AlgorithmOperation } from '../algorithms';
 import { soundManager } from '../sound';
-import { motion } from 'framer-motion';
-import { Play, Pause, Square, Gauge } from 'lucide-react';
-import { Slider } from '@/components/ui/slider';
+import { Bar, BarState } from './Bar';
+
+interface RenderState {
+  values: number[];
+  compare: Set<number>;
+  swap: Set<number>;
+  pivot: Set<number>;
+  sorted: Set<number>;
+}
+
+const EMPTY: RenderState = { values: [], compare: new Set(), swap: new Set(), pivot: new Set(), sorted: new Set() };
+
+/** Map the 1-100 speed dial to a per-tick delay and an ops-per-tick batch. */
+function pacing(speed: number, size: number): { delay: number; batch: number } {
+  const delay = Math.max(6, Math.round(130 - speed * 1.24));
+  const batch = Math.max(1, Math.round((speed / 100) ** 2 * (size / 9)));
+  return { delay, batch };
+}
 
 export const SortingVisualizer: React.FC = () => {
-  const { arrayData, isRunning, isPaused, speed, currentAlgorithm, comparisons = 0, swaps = 0, totalOperations = 0 } = useAlgorithmState();
-  const actions = useAlgorithmActions();
-  const { generateArray, incrementComparisons, incrementSwaps, markArrayAsSorted, stop, setArrayValues, toggleRunning, togglePause, setSpeed } = actions;
-  
-  const [comparingIndices, setComparingIndices] = useState<Set<number>>(new Set());
-  const [swappingIndices, setSwappingIndices] = useState<Set<number>>(new Set());
-  const [pivotIndices, setPivotIndices] = useState<Set<number>>(new Set());
-  const [sortedIndices, setSortedIndices] = useState<Set<number>>(new Set());
-  const [internalArray, setInternalArray] = useState<ArrayData[]>([]);
-  const [hasStarted, setHasStarted] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  
-  const generatorRef = useRef<Generator<AlgorithmOperation, void, unknown> | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
-  const isFinishedRef = useRef(false);
-  const internalArrayRef = useRef<ArrayData[]>([]);
-  const soundEnabledRef = useRef(soundEnabled);
+  const { arrayData, currentAlgorithm, speed, isRunning, isPaused, arraySize } = useAlgorithmState();
+  const {
+    generateArray,
+    setRunning,
+    togglePause,
+    incrementComparisons,
+    incrementSwaps,
+    incrementWrites,
+    resetStats,
+  } = useAlgorithmActions();
 
-  // Update refs when values change - use effect to avoid accessing refs during render
+  const reduceMotion = useReducedMotion();
+
+  const [render, setRender] = useState<RenderState>(EMPTY);
+  const [started, setStarted] = useState(false);
+  const [finished, setFinished] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(false);
+
+  const valuesRef = useRef<number[]>([]);
+  const maxRef = useRef<number>(1);
+  const genRef = useRef<Generator<AlgorithmOperation, void, unknown> | null>(null);
+  const sortedRef = useRef<Set<number>>(new Set());
+  const pivotRef = useRef<Set<number>>(new Set());
+  const finishedRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const soundRef = useRef(soundEnabled);
+
   useEffect(() => {
-    soundEnabledRef.current = soundEnabled;
+    soundRef.current = soundEnabled;
   }, [soundEnabled]);
 
-  // Calculate bar dimensions based on array size - ensure perfect alignment
-  const gap = 1;
-  const containerWidth = typeof window !== 'undefined' ? window.innerWidth - 48 : 1200;
-  const availableWidth = containerWidth - 100; // Account for padding
-  const barWidth = arrayData && arrayData.length > 0 
-    ? Math.floor(availableWidth / arrayData.length - gap) 
-    : 8;
-
-  // Initialize generator when algorithm changes
-  const initGenerator = useCallback((data: ArrayData[]) => {
-    const arrCopy = data.map((item) => ({ ...item }));
-    setInternalArray(arrCopy);
-    const algoFn = algorithmRegistry[currentAlgorithm];
-    if (algoFn) {
-      generatorRef.current = algoFn(arrCopy);
-      isFinishedRef.current = false;
+  const clearTimer = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
     }
-  }, [currentAlgorithm]);
+  };
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  /** Pull the (original) array from the store into the canvas; discard any run. */
+  const resetFromStore = useCallback(() => {
+    clearTimer();
+    const values = (arrayData ?? []).map((d) => d.value);
+    valuesRef.current = [...values];
+    maxRef.current = Math.max(1, ...values);
+    genRef.current = null;
+    sortedRef.current = new Set();
+    pivotRef.current = new Set();
+    finishedRef.current = false;
+    setFinished(false);
+    setStarted(false);
+    setRender({ values, compare: new Set(), swap: new Set(), pivot: new Set(), sorted: new Set() });
+  }, [arrayData]);
+
+  // Re-sync whenever the source array or algorithm changes and we're not mid-run.
   useEffect(() => {
-    if (arrayData && arrayData.length > 0) {
-      const arrCopy = arrayData.map((item) => ({ ...item }));
-      setInternalArray(arrCopy);
-      const algoFn = algorithmRegistry[currentAlgorithm];
-      if (algoFn) {
-        generatorRef.current = algoFn(arrCopy);
-        isFinishedRef.current = false;
-      }
-    }
-  }, [arrayData?.length, currentAlgorithm]);
+    resetFromStore();
+    resetStats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [arrayData, currentAlgorithm]);
 
-  // Process algorithm step
-  const processStep = useCallback(() => {
-    if (!generatorRef.current || isPaused || isFinishedRef.current) return;
+  /** Build a fresh generator + working array from the store's current array. */
+  const ensureGenerator = useCallback(() => {
+    if (genRef.current && !finishedRef.current) return;
+    const initial = (arrayData ?? []).map((d) => d.value);
+    valuesRef.current = [...initial];
+    maxRef.current = Math.max(1, ...initial);
+    sortedRef.current = new Set();
+    pivotRef.current = new Set();
+    finishedRef.current = false;
+    setFinished(false);
+    resetStats();
+    const factory = algorithmRegistry[currentAlgorithm];
+    genRef.current = factory ? factory([...initial]) : null;
+  }, [arrayData, currentAlgorithm, resetStats]);
 
-    const result = generatorRef.current.next();
-    
-    if (result.done) {
-      isFinishedRef.current = true;
-      // The internal array was modified in-place during sorting
-      // Update the display to show the sorted array
-      setArrayValues(internalArray.map((item) => item.value));
-      setSortedIndices(new Set(internalArray.map((_, i) => i)));
-      markArrayAsSorted();
-      if (soundEnabled) {
-        soundManager.playComplete();
+  const finalize = useCallback(() => {
+    finishedRef.current = true;
+    clearTimer();
+    for (let i = 0; i < valuesRef.current.length; i++) sortedRef.current.add(i);
+    pivotRef.current = new Set();
+    setFinished(true);
+    setRunning(false);
+    setRender({
+      values: [...valuesRef.current],
+      compare: new Set(),
+      swap: new Set(),
+      pivot: new Set(),
+      sorted: new Set(sortedRef.current),
+    });
+    if (soundRef.current) soundManager.playComplete();
+  }, [setRunning]);
+
+  /** Advance the generator by `batch` ops, then commit one render + stat flush. */
+  const runBatch = useCallback(
+    (batch: number) => {
+      const gen = genRef.current;
+      if (!gen || finishedRef.current) return;
+
+      const compare = new Set<number>();
+      const swap = new Set<number>();
+      let cmp = 0;
+      let swp = 0;
+      let wrt = 0;
+      let soundValue: number | null = null;
+
+      for (let s = 0; s < batch; s++) {
+        if (finishedRef.current) break;
+        const res = gen.next();
+        if (res.done) {
+          finalize();
+          return;
+        }
+        const op = res.value;
+        switch (op.type) {
+          case 'compare': {
+            cmp++;
+            op.indices.forEach((i) => compare.add(i));
+            soundValue = valuesRef.current[op.indices[0]] ?? soundValue;
+            break;
+          }
+          case 'swap': {
+            swp++;
+            const [i, j] = op.indices;
+            const v = valuesRef.current;
+            [v[i], v[j]] = [v[j], v[i]];
+            swap.add(i);
+            swap.add(j);
+            soundValue = v[i];
+            break;
+          }
+          case 'overwrite': {
+            wrt++;
+            valuesRef.current[op.index] = op.value;
+            swap.add(op.index);
+            soundValue = op.value;
+            break;
+          }
+          case 'pivot': {
+            op.indices.forEach((i) => pivotRef.current.add(i));
+            break;
+          }
+          case 'markSorted': {
+            if (op.indices) op.indices.forEach((i) => sortedRef.current.add(i));
+            else {
+              finalize();
+              return;
+            }
+            break;
+          }
+        }
       }
+
+      // Pivots that have since been locked in as sorted shouldn't keep glowing.
+      pivotRef.current.forEach((i) => {
+        if (sortedRef.current.has(i)) pivotRef.current.delete(i);
+      });
+
+      if (cmp) incrementComparisons(cmp);
+      if (swp) incrementSwaps(swp);
+      if (wrt) incrementWrites(wrt);
+      if (soundRef.current && soundValue !== null) soundManager.playCompare(soundValue, maxRef.current);
+
+      setRender({
+        values: [...valuesRef.current],
+        compare,
+        swap,
+        pivot: new Set(pivotRef.current),
+        sorted: new Set(sortedRef.current),
+      });
+    },
+    [finalize, incrementComparisons, incrementSwaps, incrementWrites],
+  );
+
+  // The animation loop: only runs while playing and not paused.
+  useEffect(() => {
+    if (!isRunning || isPaused || finishedRef.current) return;
+    if (!genRef.current) return;
+
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled || finishedRef.current) return;
+      const { delay, batch } = pacing(speed, valuesRef.current.length || arraySize);
+      runBatch(batch);
+      if (!cancelled && !finishedRef.current) timerRef.current = setTimeout(tick, delay);
+    };
+    tick();
+
+    return () => {
+      cancelled = true;
+      clearTimer();
+    };
+  }, [isRunning, isPaused, speed, arraySize, runBatch]);
+
+  /* ----------------------------- transport ------------------------------ */
+
+  const handlePlay = () => {
+    if (isRunning && !isPaused) return;
+    if (finishedRef.current) {
+      resetFromStore();
+      // resetFromStore nulls the generator; rebuild on next tick.
+      requestAnimationFrame(() => {
+        ensureGenerator();
+        setStarted(true);
+        setRunning(true);
+      });
       return;
     }
+    ensureGenerator();
+    setStarted(true);
+    if (isPaused) togglePause();
+    setRunning(true);
+  };
 
-    const operation = result.value;
-    const maxValue = internalArray.length > 0 ? Math.max(...internalArray.map(a => a.value), 1) : 1;
-    
-    switch (operation.type) {
-      case 'compare': {
-        const [i, j] = operation.indices;
-        setComparingIndices(new Set([i, j]));
-        incrementComparisons();
-        if (soundEnabledRef.current && internalArray[i] && internalArray[j]) {
-          soundManager.playCompare(internalArray[i].value, maxValue);
-        }
-        break;
-      }
-      
-      case 'swap': {
-        const [i, j] = operation.indices;
-        setSwappingIndices(new Set([i, j]));
-        incrementSwaps();
-        if (soundEnabledRef.current && internalArray[i] && internalArray[j]) {
-          soundManager.playSwap(internalArray[i].value, internalArray[j].value, maxValue);
-        }
-        
-        setInternalArray((prev) => {
-          const newArray = [...prev];
-          const temp = newArray[i];
-          newArray[i] = newArray[j];
-          newArray[j] = temp;
-          return newArray;
-        });
-        break;
-      }
-      
-      case 'pivot': {
-        setPivotIndices((prev) => new Set([...prev, operation.index]));
-        break;
-      }
-      
-      case 'markSorted': {
-        isFinishedRef.current = true;
-        // Update the store with the final sorted array
-        const sortedValues = internalArray.map((item) => item.value);
-        setArrayValues(sortedValues);
-        setSortedIndices(new Set(internalArray.map((_, i) => i)));
-        markArrayAsSorted();
-        if (soundEnabledRef.current) {
-          soundManager.playComplete();
-        }
-        break;
-      }
-    }
-  }, [isPaused, internalArray, incrementComparisons, incrementSwaps, markArrayAsSorted, setArrayValues]);
+  const handlePause = () => {
+    if (isRunning) togglePause();
+  };
 
-  // Animation loop
-  useEffect(() => {
-    if (isRunning && !isPaused && !isFinishedRef.current && generatorRef.current) {
-      const delay = Math.max(10, 100 - speed * 0.9);
-      
-      const runStep = () => {
-        processStep();
-        animationFrameRef.current = setTimeout(runStep, delay) as unknown as number;
-      };
-      
-      animationFrameRef.current = setTimeout(runStep, delay) as unknown as number;
-    }
-    
-    return () => {
-      if (animationFrameRef.current) {
-        clearTimeout(animationFrameRef.current);
-      }
-    };
-  }, [isRunning, isPaused, processStep, speed]);
+  const handleStop = () => {
+    setRunning(false);
+    resetFromStore();
+    resetStats();
+  };
+
+  const handleStep = () => {
+    if (finishedRef.current) return;
+    ensureGenerator();
+    setStarted(true);
+    if (!isRunning) setRunning(true);
+    if (!isPaused) togglePause();
+    // Run exactly one operation.
+    runBatch(1);
+  };
 
   const handleRegenerate = () => {
-    stop();
-    setHasStarted(false);
-    setSortedIndices(new Set());
-    setComparingIndices(new Set());
-    setSwappingIndices(new Set());
-    setPivotIndices(new Set());
-    isFinishedRef.current = false;
+    setRunning(false);
     generateArray();
   };
 
-  const handleStart = () => {
-    setHasStarted(true);
-    if (arrayData) {
-      const arrCopy = arrayData.map((item) => ({ ...item }));
-      initGenerator(arrCopy);
-    }
+  const toggleSound = () => setSoundEnabled(soundManager.toggle());
+
+  /* ------------------------------ render -------------------------------- */
+
+  const playing = isRunning && !isPaused;
+  const n = render.values.length || (arrayData?.length ?? 0);
+  const showLabels = n <= 28;
+  const progress = n > 0 ? (render.sorted.size / n) * 100 : 0;
+
+  const barState = (i: number): BarState => {
+    if (render.sorted.has(i)) return 'sorted';
+    if (render.pivot.has(i)) return 'pivot';
+    if (render.swap.has(i)) return 'swap';
+    if (render.compare.has(i)) return 'compare';
+    return 'idle';
   };
-
-  const toggleSound = () => {
-    const newEnabled = soundManager.toggle();
-    setSoundEnabled(newEnabled);
-  };
-
-  const displayArray = (hasStarted && internalArray.length > 0) ? internalArray : arrayData;
-  const maxValue = displayArray && displayArray.length > 0 ? Math.max(...displayArray.map((a) => a.value), 1) : 1;
-
-  // Guard against undefined/empty arrayData
-  if (!arrayData || arrayData.length === 0) {
-    return (
-      <div className="relative w-full h-[60vh] glass rounded-2xl overflow-hidden flex items-center justify-center">
-        <p className="text-gray-400">Loading...</p>
-      </div>
-    );
-  }
 
   return (
-    <div className="relative w-full h-[60vh] glass rounded-2xl overflow-hidden">
-      {/* Visualizer Container */}
-      <div className="absolute inset-4 flex items-end justify-center">
-        {displayArray.map((item, index) => (
-          <Bar
-            key={index}
-            data={item}
-            index={index}
-            maxValue={maxValue}
-            isComparing={comparingIndices.has(index)}
-            isSwapping={swappingIndices.has(index)}
-            isSorted={sortedIndices.has(index)}
-            isPivot={pivotIndices.has(index)}
-            barWidth={barWidth}
-            gap={gap}
+    <div className="flex flex-col gap-3">
+      <div className="panel relative overflow-hidden rounded-2xl">
+        {/* faint instrument grid */}
+        <div className="pointer-events-none absolute inset-0 opacity-[0.4] [background-image:linear-gradient(rgba(255,255,255,0.025)_1px,transparent_1px)] [background-size:100%_24px]" />
+
+        {/* progress hairline */}
+        <div className="absolute inset-x-0 top-0 h-px bg-white/5">
+          <motion.div
+            className="h-full bg-gradient-to-r from-[#22D3EE] via-[#7DD3FC] to-[#FFB627]"
+            animate={{ width: `${progress}%` }}
+            transition={{ duration: reduceMotion ? 0 : 0.25 }}
           />
-        ))}
+        </div>
+
+        <div className="relative flex h-[56vh] min-h-[320px] items-end gap-px px-4 pb-4 pt-6">
+          {render.values.map((value, i) => (
+            <Bar key={i} value={value} maxValue={maxRef.current} state={barState(i)} showLabel={showLabels} />
+          ))}
+
+          {!started && (
+            <div className="absolute inset-0 flex items-center justify-center bg-[#0B0E14]/40 backdrop-blur-[2px]">
+              <motion.button
+                onClick={handlePlay}
+                whileHover={reduceMotion ? undefined : { scale: 1.04 }}
+                whileTap={reduceMotion ? undefined : { scale: 0.97 }}
+                className="group flex items-center gap-3 rounded-full bg-[#FFB627] px-7 py-3.5 font-medium text-[#0B0E14] shadow-[0_0_30px_rgba(255,182,39,0.35)]"
+              >
+                <Play className="h-5 w-5" fill="currentColor" />
+                Run {currentAlgorithm}
+              </motion.button>
+            </div>
+          )}
+        </div>
       </div>
-      
-      {/* Regenerate Button */}
-      <div className="absolute top-4 right-4 flex gap-2">
-        <button
-          onClick={toggleSound}
-          className={`px-4 py-2 glass glass-hover rounded-lg text-sm font-medium
-                     transition-all duration-200 ${soundEnabled ? 'bg-[#E63946]/30' : ''}`}
-        >
-          {soundEnabled ? '🔊 Sound On' : '🔇 Sound Off'}
-        </button>
-        <button
-          onClick={handleRegenerate}
-          className="px-4 py-2 glass glass-hover rounded-lg text-sm font-medium
-                     text-white transition-all duration-200"
-        >
-          Regenerate Array
-        </button>
-      </div>
-      
-      {/* Start Button Overlay - shown when not running */}
-      {!isRunning && !hasStarted && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-sm">
-          <button
-            onClick={handleStart}
-            className="px-8 py-4 bg-[#E63946] hover:bg-[#E63946]/80 rounded-2xl text-white font-semibold
-                       shadow-lg shadow-[#E63946]/30 transition-all duration-200 transform hover:scale-105"
-          >
-            Start Sorting
+
+      {/* control deck */}
+      <div className="panel flex flex-wrap items-center gap-3 rounded-2xl px-4 py-3">
+        <div className="flex items-center gap-1.5">
+          {!playing ? (
+            <button onClick={handlePlay} className="ctrl-primary" aria-label="Play">
+              <Play className="h-4 w-4" fill="currentColor" />
+            </button>
+          ) : (
+            <button onClick={handlePause} className="ctrl-primary" aria-label="Pause">
+              <Pause className="h-4 w-4" fill="currentColor" />
+            </button>
+          )}
+          <button onClick={handleStep} className="ctrl" aria-label="Step one operation" title="Step">
+            <SkipForward className="h-4 w-4" />
+          </button>
+          <button onClick={handleStop} className="ctrl" aria-label="Stop and reset" title="Stop">
+            <Square className="h-4 w-4" />
           </button>
         </div>
-      )}
-      
-      {/* Info Overlay */}
-      <div className="absolute bottom-4 left-4 glass px-4 py-2 rounded-lg">
-        <p className="text-xs text-gray-400">
-          Array Size: <span className="text-white font-mono">{arrayData.length}</span>
-        </p>
+
+        <div className="mx-1 h-7 w-px bg-white/10" />
+
+        <button onClick={handleRegenerate} className="ctrl-wide" title="New array">
+          <Shuffle className="h-4 w-4" />
+          <span>Shuffle</span>
+        </button>
+        <button onClick={resetFromStore} className="ctrl-wide" title="Reset bars to original">
+          <RotateCcw className="h-4 w-4" />
+          <span>Reset</span>
+        </button>
+
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={toggleSound}
+            className={`ctrl ${soundEnabled ? 'text-[#FFB627]' : 'text-white/55'}`}
+            title={soundEnabled ? 'Mute' : 'Sound on'}
+            aria-pressed={soundEnabled}
+          >
+            {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+          </button>
+          <span className="font-mono text-[11px] uppercase tracking-[0.15em] text-white/40">
+            {finished ? 'complete' : playing ? 'running' : started ? 'paused' : 'ready'}
+          </span>
+        </div>
       </div>
     </div>
   );

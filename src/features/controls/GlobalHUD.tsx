@@ -1,128 +1,75 @@
 'use client';
 
 import React from 'react';
-import { motion } from 'framer-motion';
-import { useAlgorithmState, useAlgorithmActions } from '@/entities/algorithm/store';
-import { Play, Pause, Square, FastForward, Zap, Gauge } from 'lucide-react';
-import { Slider } from '@/components/ui/slider';
+import { motion, useReducedMotion } from 'framer-motion';
+import { GitCompareArrows, ArrowLeftRight, PenLine, Sigma } from 'lucide-react';
+import { useAlgorithmState, useAlgorithmActions, ALGORITHM_LIST } from '@/entities/algorithm/store';
+
+const Stat: React.FC<{ icon: React.ReactNode; label: string; value: number; color: string }> = ({
+  icon,
+  label,
+  value,
+  color,
+}) => (
+  <div className="flex items-center gap-2.5">
+    <span className="text-white/40">{icon}</span>
+    <div>
+      <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-white/40">{label}</p>
+      <p className="font-mono text-lg font-semibold tabular-nums" style={{ color }}>
+        {value.toLocaleString()}
+      </p>
+    </div>
+  </div>
+);
 
 export const GlobalHUD: React.FC = () => {
-  const { isRunning, isPaused, speed, comparisons, swaps, totalOperations, arrayData } = useAlgorithmState();
-  const { toggleRunning, togglePause, stop, setSpeed, stepForward, generateArray } = useAlgorithmActions();
-
-  const sortedCount = (arrayData || []).filter((item: { isSorted?: boolean }) => item.isSorted).length;
-  const progress = (arrayData || []).length > 0 ? (sortedCount / (arrayData?.length || 1)) * 100 : 0;
+  const { comparisons, swaps, writes, totalOperations, currentAlgorithm } = useAlgorithmState();
+  const { getAlgorithm } = useAlgorithmActions();
+  const reduceMotion = useReducedMotion();
+  const meta = getAlgorithm(currentAlgorithm) ?? ALGORITHM_LIST.bubble;
 
   return (
     <motion.div
-      initial={{ y: 100, opacity: 0 }}
+      initial={reduceMotion ? false : { y: 16, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
-      transition={{ duration: 0.5, ease: 'easeOut' }}
-      className="fixed relative bottom-35 z-50"
+      transition={{ duration: 0.4, ease: 'easeOut' }}
+      className="panel grid grid-cols-1 gap-5 rounded-2xl p-5 lg:grid-cols-[1.3fr_1fr]"
     >
-      <div className="glass glass-strong px-6 py-4 rounded-2xl shadow-2xl max-w-[calc(100vw-12rem)]">
-        {/* Progress Bar */}
-        <div className="mb-4">
-          <div className="h-1 bg-white/10 rounded-full overflow-hidden">
-            <motion.div
-              className="h-full bg-gradient-to-r from-[#E63946] to-[#4CC9F0]"
-              initial={{ width: 0 }}
-              animate={{ width: `${progress}%` }}
-              transition={{ duration: 0.3 }}
-            />
-          </div>
+      {/* live counters */}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <Stat icon={<GitCompareArrows className="h-4 w-4" />} label="Compares" value={comparisons} color="#F8FAFC" />
+        <Stat icon={<ArrowLeftRight className="h-4 w-4" />} label="Swaps" value={swaps} color="#FF4D6D" />
+        <Stat icon={<PenLine className="h-4 w-4" />} label="Writes" value={writes} color="#22D3EE" />
+        <Stat icon={<Sigma className="h-4 w-4" />} label="Total ops" value={totalOperations} color="#FFB627" />
+      </div>
+
+      {/* complexity card */}
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-white">{meta.displayName}</h3>
+          <span
+            className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${
+              meta.stable ? 'bg-[#22D3EE]/15 text-[#22D3EE]' : 'bg-white/10 text-white/50'
+            }`}
+          >
+            {meta.stable ? 'stable' : 'unstable'}
+          </span>
         </div>
-
-        <div className="flex items-center gap-6">
-          {/* Playback Controls */}
-          <div className="flex items-center gap-2">
-            {!isRunning ? (
-              <button
-                onClick={toggleRunning}
-                className="w-12 h-12 flex items-center justify-center rounded-full bg-[#E63946] hover:bg-[#E63946]/80 
-                           transition-colors shadow-lg shadow-[#E63946]/30"
-              >
-                <Play className="w-5 h-5 text-white" fill="currentColor" />
-              </button>
-            ) : (
-              <>
-                <button
-                  onClick={togglePause}
-                  className="w-12 h-12 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 
-                             transition-colors"
-                >
-                  {isPaused ? (
-                    <Play className="w-5 h-5 text-white" fill="currentColor" />
-                  ) : (
-                    <Pause className="w-5 h-5 text-white" fill="currentColor" />
-                  )}
-                </button>
-                <button
-                  onClick={stop}
-                  className="w-10 h-10 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/10 
-                             transition-colors"
-                >
-                  <Square className="w-4 h-4 text-white" fill="currentColor" />
-                </button>
-              </>
-            )}
-          </div>
-
-          {/* Divider */}
-          <div className="h-12 w-px bg-white/10" />
-
-          {/* Step Controls */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={stepForward}
-              disabled={!isRunning || isPaused}
-              className="px-4 py-2 glass glass-hover rounded-lg text-sm font-medium text-white 
-                         disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <div className="flex items-center gap-2">
-                <FastForward className="w-4 h-4" />
-                <span>Step</span>
-              </div>
-            </button>
-          </div>
-
-          {/* Divider */}
-          <div className="h-12 w-px bg-white/10" />
-
-          {/* Speed Control */}
-          <div className="flex items-center gap-3">
-            <Gauge className="w-4 h-4 text-gray-400" />
-            <div className="w-32">
-              <Slider
-                value={[speed]}
-                min={1}
-                max={100}
-                step={1}
-                onValueChange={(value) => setSpeed(value as number)}
-                className="cursor-pointer"
-              />
+        <p className="mb-3 text-[12px] leading-relaxed text-white/55">{meta.blurb}</p>
+        <div className="grid grid-cols-4 gap-2 font-mono text-[11px]">
+          {(
+            [
+              ['Best', meta.complexity.best],
+              ['Avg', meta.complexity.average],
+              ['Worst', meta.complexity.worst],
+              ['Space', meta.complexity.space],
+            ] as const
+          ).map(([k, v]) => (
+            <div key={k} className="rounded-md bg-black/20 px-2 py-1.5 text-center">
+              <p className="text-[9px] uppercase tracking-wider text-white/35">{k}</p>
+              <p className="mt-0.5 text-white/80">{v}</p>
             </div>
-            <span className="text-xs text-gray-400 w-8 text-right">{speed}%</span>
-          </div>
-
-          {/* Divider */}
-          <div className="h-12 w-px bg-white/10" />
-
-          {/* Statistics */}
-          <div className="flex items-center gap-4">
-            <div className="text-center">
-              <p className="text-xs text-gray-400 uppercase tracking-wider">Comparisons</p>
-              <p className="text-lg font-mono font-bold text-[#4CC9F0]">{(comparisons ?? 0).toLocaleString()}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-xs text-gray-400 uppercase tracking-wider">Swaps</p>
-              <p className="text-lg font-mono font-bold text-[#E63946]">{(swaps ?? 0).toLocaleString()}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-xs text-gray-400 uppercase tracking-wider">Operations</p>
-              <p className="text-lg font-mono font-bold text-white">{(totalOperations ?? 0).toLocaleString()}</p>
-            </div>
-          </div>
+          ))}
         </div>
       </div>
     </motion.div>

@@ -1,87 +1,75 @@
 'use client';
 
-import React, { memo, useMemo } from 'react';
-import { motion } from 'framer-motion';
-import { ArrayData } from '../store';
+import React, { memo } from 'react';
+
+export type BarState = 'idle' | 'compare' | 'swap' | 'pivot' | 'sorted';
 
 interface BarProps {
-  data: ArrayData;
-  index: number;
+  value: number;
   maxValue: number;
-  isComparing: boolean;
-  isSwapping: boolean;
-  isSorted: boolean;
-  isPivot: boolean;
-  barWidth: number;
-  gap: number;
+  state: BarState;
+  showLabel: boolean;
 }
 
-const BarComponent: React.FC<BarProps> = ({
-  data,
-  index,
-  maxValue,
-  isComparing,
-  isSwapping,
-  isSorted,
-  isPivot,
-  barWidth,
-  gap,
-}) => {
-  const height = useMemo(() => {
-    return (data.value / maxValue) * 100;
-  }, [data.value, maxValue]);
+/**
+ * A single bar. Deliberately a plain div (no per-bar framer-motion `layout`):
+ * with up to 200 bars updating dozens of times per second, layout animations
+ * would jank. Height/colour transitions are cheap CSS and read as smooth.
+ * Width is handled by the parent flex container (flex-1) so it stays responsive.
+ */
+const BarComponent: React.FC<BarProps> = ({ value, maxValue, state, showLabel }) => {
+  const heightPct = (value / maxValue) * 100;
 
-  const xPosition = useMemo(() => {
-    return index * (barWidth + gap);
-  }, [index, barWidth, gap]);
+  // Duotone spectrum: low values teal (hue ~190) → high values amber (hue ~42).
+  const t = Math.min(1, Math.max(0, value / maxValue));
+  const baseHue = 190 - t * 148;
+  const baseColor = `hsl(${baseHue} 85% 58%)`;
 
-  // Determine bar color based on state
-  const getBarColor = () => {
-    if (isSorted) return '#4CC9F0'; // Blue for sorted
-    if (isPivot) return '#E63946'; // Red for pivot
-    if (isSwapping) return '#F72585'; // Pink for swapping
-    if (isComparing) return '#E63946'; // Red for comparing
-    return '#7209B7'; // Default purple
-  };
+  let color = baseColor;
+  let glow = 'none';
+  switch (state) {
+    case 'compare':
+      color = '#F8FAFC';
+      glow = '0 0 12px rgba(248,250,252,0.55)';
+      break;
+    case 'swap':
+      color = '#FF4D6D';
+      glow = '0 0 16px rgba(255,77,109,0.6)';
+      break;
+    case 'pivot':
+      color = '#FFB627';
+      glow = '0 0 18px rgba(255,182,39,0.8)';
+      break;
+    case 'sorted':
+      color = `hsl(${baseHue} 92% 62%)`;
+      glow = '0 0 9px hsl(158 90% 50% / 0.45)';
+      break;
+  }
 
   return (
-    <motion.div
-      className="absolute bottom-0 rounded-t-md"
-      style={{
-        left: xPosition,
-        width: barWidth,
-        height: `${height}%`,
-        backgroundColor: getBarColor(),
-        boxShadow: isComparing || isSwapping || isPivot 
-          ? `0 0 15px ${getBarColor()}80` 
-          : 'none',
-        transition: 'background-color 0.15s ease, box-shadow 0.15s ease',
-      }}
-      layout
-      layoutId={`bar-${index}`}
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ 
-        opacity: 1, 
-        y: 0,
-        height: `${height}%`,
-      }}
-      transition={{ 
-        duration: 0.2,
-        ease: 'easeOut',
-      }}
-    />
+    <div className="relative flex h-full min-w-0 flex-1 flex-col justify-end" aria-hidden="true">
+      {showLabel && (
+        <span
+          className="absolute left-1/2 -translate-x-1/2 font-mono text-[9px] tabular-nums text-white/45"
+          style={{ bottom: `calc(${heightPct}% + 3px)` }}
+        >
+          {value}
+        </span>
+      )}
+      <div
+        className="w-full rounded-t-[2px]"
+        style={{
+          height: `${heightPct}%`,
+          backgroundColor: color,
+          boxShadow: glow,
+          transition:
+            'height 120ms cubic-bezier(0.22,1,0.36,1), background-color 90ms linear, box-shadow 90ms linear',
+          willChange: 'height',
+        }}
+      />
+    </div>
   );
 };
 
-export const Bar = memo(BarComponent, (prev, next) => {
-  return (
-    prev.data.value === next.data.value &&
-    prev.isComparing === next.isComparing &&
-    prev.isSwapping === next.isSwapping &&
-    prev.isSorted === next.isSorted &&
-    prev.isPivot === next.isPivot &&
-    prev.maxValue === next.maxValue
-  );
-});
-
+export const Bar = memo(BarComponent);
 Bar.displayName = 'Bar';
