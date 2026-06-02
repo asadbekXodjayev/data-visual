@@ -2,18 +2,20 @@
 
 import { useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { BarChart3, Route } from 'lucide-react';
+import { BarChart3, Network, Route } from 'lucide-react';
 import { SortingVisualizer } from '@/entities/algorithm/components/SortingVisualizer';
 import { AlgorithmSelector } from '@/entities/algorithm/components/AlgorithmSelector';
 import { ArrayControls } from '@/entities/algorithm/components/ArrayControls';
 import { GlobalHUD } from '@/features/controls/GlobalHUD';
 import { PathfindingVisualizer } from '@/features/pathfinding';
+import { TreeVisualizer } from '@/features/trees';
 
-type Mode = 'sorting' | 'pathfinding';
+type Mode = 'sorting' | 'pathfinding' | 'trees';
 
 const MODES: { id: Mode; label: string; icon: React.ReactNode }[] = [
   { id: 'sorting', label: 'Sorting', icon: <BarChart3 className="h-4 w-4" /> },
   { id: 'pathfinding', label: 'Pathfinding', icon: <Route className="h-4 w-4" /> },
+  { id: 'trees', label: 'Trees', icon: <Network className="h-4 w-4" /> },
 ];
 
 export default function Home() {
@@ -85,7 +87,7 @@ export default function Home() {
         </header>
 
         <AnimatePresence mode="wait">
-          {mode === 'sorting' ? (
+          {mode === 'sorting' && (
             <motion.div
               key="sorting"
               initial={reduceMotion ? false : { opacity: 0, y: 12 }}
@@ -112,7 +114,9 @@ export default function Home() {
                 </div>
               </aside>
             </motion.div>
-          ) : (
+          )}
+
+          {mode === 'pathfinding' && (
             <motion.div
               key="pathfinding"
               initial={reduceMotion ? false : { opacity: 0, y: 12 }}
@@ -121,6 +125,18 @@ export default function Home() {
               transition={{ duration: 0.3 }}
             >
               <PathfindingVisualizer />
+            </motion.div>
+          )}
+
+          {mode === 'trees' && (
+            <motion.div
+              key="trees"
+              initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={reduceMotion ? undefined : { opacity: 0, y: -12 }}
+              transition={{ duration: 0.3 }}
+            >
+              <TreeVisualizer />
             </motion.div>
           )}
         </AnimatePresence>
